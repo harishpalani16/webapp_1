@@ -13,11 +13,32 @@ const Canvas3D = () => {
   const [showGrid, setShowGrid] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [gridSize] = useState(1);
+  const [viewport, setViewport] = useState('perspective'); // 'perspective', 'orthographic', 'top', 'front', 'side'
+  const [renderMode, setRenderMode] = useState('solid'); // 'solid', 'wireframe', 'both', 'artistic', 'pen', 'ink'
+  const [lighting, setLighting] = useState({
+    ambient: 0.6,
+    directional: 0.8,
+    shadows: true,
+    lightDirection: { x: 5, y: 5, z: 5 }
+  });
 
   useEffect(() => {
     // Scene setup
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    let camera;
+    
+    // Create camera based on viewport setting
+    if (viewport === 'orthographic') {
+      const aspect = window.innerWidth / window.innerHeight;
+      const frustumSize = 10;
+      camera = new THREE.OrthographicCamera(
+        -frustumSize * aspect / 2, frustumSize * aspect / 2,
+        frustumSize / 2, -frustumSize / 2, 0.1, 1000
+      );
+    } else {
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    }
+    
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     
     // Renderer settings
@@ -45,20 +66,89 @@ const Canvas3D = () => {
       scene.add(gridHelper);
     }
 
-    // Create materials
-    const material = new THREE.MeshPhongMaterial({ 
-      color: 0x00ff88,
-      shininess: 100,
-      transparent: true,
-      opacity: 0.8
+    // Create materials for different render modes
+    const createMaterial = (mode) => {
+      switch (mode) {
+        case 'artistic':
+          return new THREE.MeshLambertMaterial({ 
+            color: 0x666666,
+            flatShading: true
+          });
+        case 'pen':
+          return new THREE.MeshBasicMaterial({ 
+            color: 0x000000,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.8
+          });
+        case 'ink':
+          return new THREE.MeshBasicMaterial({ 
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.9
+          });
+        case 'solid':
+        default:
+          return new THREE.MeshPhongMaterial({ 
+            color: 0x888888,
+            shininess: 30,
+            transparent: false,
+            opacity: 1.0
+          });
+      }
+    };
+
+    const material = createMaterial(renderMode);
+    const wireframeMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0x00ff00,
+      wireframe: true,
+      transparent: false,
+      opacity: 1.0
     });
 
-    const wireframeMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0xffffff,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.3
-    });
+    // Function to update render mode for all objects
+    const updateRenderMode = (mode) => {
+      objectGroup.children.forEach(obj => {
+        if (obj.userData.type) {
+          // Update material based on render mode
+          const newMaterial = createMaterial(mode);
+          obj.material.dispose(); // Dispose old material
+          obj.material = newMaterial;
+          
+          // Update wireframe material for pen mode
+          if (obj.wireframe) {
+            if (mode === 'pen') {
+              obj.wireframe.material = new THREE.MeshBasicMaterial({ 
+                color: 0x000000,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.8
+              });
+            } else {
+              obj.wireframe.material = wireframeMaterial;
+            }
+          }
+          
+          switch (mode) {
+            case 'solid':
+            case 'artistic':
+            case 'ink':
+              obj.visible = true;
+              if (obj.wireframe) obj.wireframe.visible = false;
+              break;
+            case 'wireframe':
+            case 'pen':
+              obj.visible = false;
+              if (obj.wireframe) obj.wireframe.visible = true;
+              break;
+            case 'both':
+              obj.visible = true;
+              if (obj.wireframe) obj.wireframe.visible = obj.userData.selected;
+              break;
+          }
+        }
+      });
+    };
 
     // Create primitive geometries
     const geometries = {
@@ -77,7 +167,7 @@ const Canvas3D = () => {
     // Create object function
     const createObject = (type, position = new THREE.Vector3(0, 0, 0)) => {
       const geometry = geometries[type];
-      const mesh = new THREE.Mesh(geometry, material.clone());
+      const mesh = new THREE.Mesh(geometry, createMaterial(renderMode));
       const wireframe = new THREE.Mesh(geometry, wireframeMaterial.clone());
       
       mesh.position.copy(position);
@@ -96,6 +186,9 @@ const Canvas3D = () => {
       };
       wireframe.userData = { id: objectId, type: type };
       
+      // Store reference to wireframe in mesh for easy access
+      mesh.wireframe = wireframe;
+      
       objectGroup.add(mesh);
       objectGroup.add(wireframe);
       
@@ -105,6 +198,9 @@ const Canvas3D = () => {
     // Add initial object
     const initialObject = createObject(selectedPrimitive);
     setObjects([initialObject]);
+
+    // Apply initial render mode
+    updateRenderMode(renderMode);
 
     // Mouse interaction
     const raycaster = new THREE.Raycaster();
@@ -151,23 +247,56 @@ const Canvas3D = () => {
           objectGroup.children.forEach(obj => {
             if (obj.userData.type) {
               obj.userData.selected = false;
-              obj.material.color.setHex(0x00ff88);
-              obj.userData.wireframe.visible = false;
+              // Only change color for solid mode, others have specific colors
+              if (renderMode === 'solid' || renderMode === 'both') {
+                obj.material.color.setHex(0x888888);
+              }
+              if (obj.wireframe) {
+                if (renderMode === 'wireframe' || renderMode === 'pen') {
+                  obj.wireframe.visible = true;
+                } else if (renderMode === 'both') {
+                  obj.wireframe.visible = obj.userData.selected;
+                } else {
+                  obj.wireframe.visible = false;
+                }
+              }
             }
           });
           
           // Select clicked object
           clickedObject.userData.selected = true;
-          clickedObject.material.color.setHex(0xff6b6b);
-          clickedObject.userData.wireframe.visible = true;
+          // Only change color for solid mode, others have specific colors
+          if (renderMode === 'solid' || renderMode === 'both') {
+            clickedObject.material.color.setHex(0x0066ff);
+          }
+          if (clickedObject.wireframe) {
+            if (renderMode === 'wireframe' || renderMode === 'pen') {
+              clickedObject.wireframe.visible = true;
+            } else if (renderMode === 'both') {
+              clickedObject.wireframe.visible = true;
+            } else {
+              clickedObject.wireframe.visible = false;
+            }
+          }
           setSelectedObject(clickedObject);
         } else {
           // Deselect all
           objectGroup.children.forEach(obj => {
             if (obj.userData.type) {
               obj.userData.selected = false;
-              obj.material.color.setHex(0x00ff88);
-              obj.userData.wireframe.visible = false;
+              // Only change color for solid mode, others have specific colors
+              if (renderMode === 'solid' || renderMode === 'both') {
+                obj.material.color.setHex(0x888888);
+              }
+              if (obj.wireframe) {
+                if (renderMode === 'wireframe' || renderMode === 'pen') {
+                  obj.wireframe.visible = true;
+                } else if (renderMode === 'both') {
+                  obj.wireframe.visible = obj.userData.selected;
+                } else {
+                  obj.wireframe.visible = false;
+                }
+              }
             }
           });
           setSelectedObject(null);
@@ -195,28 +324,57 @@ const Canvas3D = () => {
     renderer.domElement.addEventListener('mouseup', onMouseUp);
     window.addEventListener('keydown', onKeyDown);
 
-    // Add lights
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+    // Add lights with controls
+    const ambientLight = new THREE.AmbientLight(0x404040, lighting.ambient);
     scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(5, 5, 5);
-    directionalLight.castShadow = true;
+    const directionalLight = new THREE.DirectionalLight(0xffffff, lighting.directional);
+    directionalLight.position.set(lighting.lightDirection.x, lighting.lightDirection.y, lighting.lightDirection.z);
+    directionalLight.castShadow = lighting.shadows;
     directionalLight.shadow.mapSize.width = 2048;
     directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.camera.near = 0.5;
+    directionalLight.shadow.camera.far = 50;
+    directionalLight.shadow.camera.left = -10;
+    directionalLight.shadow.camera.right = 10;
+    directionalLight.shadow.camera.top = 10;
+    directionalLight.shadow.camera.bottom = -10;
     scene.add(directionalLight);
 
-    // Add point lights for more dynamic lighting
-    const pointLight1 = new THREE.PointLight(0xff6b6b, 1, 100);
-    pointLight1.position.set(-5, 5, 5);
+    // Add fill lights for better modeling
+    const pointLight1 = new THREE.PointLight(0xffffff, 0.4, 100);
+    pointLight1.position.set(5, 5, 5);
     scene.add(pointLight1);
 
-    const pointLight2 = new THREE.PointLight(0x4ecdc4, 1, 100);
-    pointLight2.position.set(5, -5, -5);
+    const pointLight2 = new THREE.PointLight(0xffffff, 0.3, 100);
+    pointLight2.position.set(-5, 5, -5);
     scene.add(pointLight2);
 
-    // Camera position
-    camera.position.z = 5;
+    // Set camera position based on viewport
+    const setCameraView = (view) => {
+      switch (view) {
+        case 'top':
+          camera.position.set(0, 10, 0);
+          camera.lookAt(0, 0, 0);
+          break;
+        case 'front':
+          camera.position.set(0, 0, 10);
+          camera.lookAt(0, 0, 0);
+          break;
+        case 'side':
+          camera.position.set(10, 0, 0);
+          camera.lookAt(0, 0, 0);
+          break;
+        case 'perspective':
+        case 'orthographic':
+        default:
+          camera.position.set(5, 5, 5);
+          camera.lookAt(0, 0, 0);
+          break;
+      }
+    };
+    
+    setCameraView(viewport);
 
     // Animation loop
     const animate = () => {
@@ -225,21 +383,7 @@ const Canvas3D = () => {
       // Update controls
       controls.update();
       
-      // Rotate all objects
-      objectGroup.children.forEach(obj => {
-        if (obj.userData.type && !obj.userData.selected) {
-          obj.rotation.x += 0.01;
-          obj.rotation.y += 0.01;
-          if (obj.userData.wireframe) {
-            obj.userData.wireframe.rotation.x += 0.01;
-            obj.userData.wireframe.rotation.y += 0.01;
-          }
-        }
-      });
-      
-      // Animate lights
-      pointLight1.position.x = Math.sin(Date.now() * 0.001) * 5;
-      pointLight2.position.x = Math.cos(Date.now() * 0.001) * 5;
+      // No animations - static modeling environment
       
       renderer.render(scene, camera);
     };
@@ -248,8 +392,18 @@ const Canvas3D = () => {
 
     // Handle window resize
     const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
+      if (viewport === 'orthographic') {
+        const aspect = window.innerWidth / window.innerHeight;
+        const frustumSize = 10;
+        camera.left = -frustumSize * aspect / 2;
+        camera.right = frustumSize * aspect / 2;
+        camera.top = frustumSize / 2;
+        camera.bottom = -frustumSize / 2;
+        camera.updateProjectionMatrix();
+      } else {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+      }
       renderer.setSize(window.innerWidth, window.innerHeight);
     };
 
@@ -267,7 +421,8 @@ const Canvas3D = () => {
       }
       renderer.dispose();
     };
-  }, [selectedPrimitive, mode, showGrid, snapToGrid]);
+  }, [selectedPrimitive, mode, showGrid, snapToGrid, viewport, renderMode, lighting]);
+
 
   const primitives = [
     { key: 'cube', name: 'Cube', icon: '⬜' },
@@ -289,14 +444,6 @@ const Canvas3D = () => {
   return (
     <div className="canvas-container">
       <div ref={mountRef} className="canvas-3d" />
-      <div className="canvas-overlay">
-        <h2>3D Modeling Environment</h2>
-        <p>Powered by Three.js</p>
-        <div className="controls-info">
-          <p>🖱️ Left click + drag: Rotate | Scroll: Zoom | Right click + drag: Pan</p>
-          <p>⌨️ Delete: Remove selected object</p>
-        </div>
-      </div>
       
       {/* Mode Controls */}
       <div className="mode-controls">
@@ -343,6 +490,128 @@ const Canvas3D = () => {
           </div>
         </div>
       )}
+
+      {/* Viewport Controls */}
+      <div className="viewport-controls">
+        <h3>Viewport</h3>
+        <div className="viewport-options">
+          <div className="viewport-group">
+            <label>Camera:</label>
+            <select 
+              value={viewport} 
+              onChange={(e) => setViewport(e.target.value)}
+              className="viewport-select"
+            >
+              <option value="perspective">Perspective</option>
+              <option value="orthographic">Orthographic</option>
+              <option value="top">Top View</option>
+              <option value="front">Front View</option>
+              <option value="side">Side View</option>
+            </select>
+          </div>
+          <div className="viewport-group">
+            <label>Render:</label>
+            <select 
+              value={renderMode} 
+              onChange={(e) => setRenderMode(e.target.value)}
+              className="viewport-select"
+            >
+              <option value="solid">Solid</option>
+              <option value="wireframe">Wireframe</option>
+              <option value="both">Both</option>
+              <option value="artistic">Artistic</option>
+              <option value="pen">Pen</option>
+              <option value="ink">Ink</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Lighting Controls */}
+      <div className="lighting-controls">
+        <h3>Lighting</h3>
+        <div className="lighting-options">
+          <div className="lighting-group">
+            <label>Ambient: {lighting.ambient.toFixed(1)}</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.1"
+              value={lighting.ambient}
+              onChange={(e) => setLighting(prev => ({ ...prev, ambient: parseFloat(e.target.value) }))}
+              className="lighting-slider"
+            />
+          </div>
+          <div className="lighting-group">
+            <label>Directional: {lighting.directional.toFixed(1)}</label>
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              value={lighting.directional}
+              onChange={(e) => setLighting(prev => ({ ...prev, directional: parseFloat(e.target.value) }))}
+              className="lighting-slider"
+            />
+          </div>
+          <div className="lighting-group">
+            <label>Light Direction X: {lighting.lightDirection.x}</label>
+            <input
+              type="range"
+              min="-10"
+              max="10"
+              step="1"
+              value={lighting.lightDirection.x}
+              onChange={(e) => setLighting(prev => ({ 
+                ...prev, 
+                lightDirection: { ...prev.lightDirection, x: parseInt(e.target.value) }
+              }))}
+              className="lighting-slider"
+            />
+          </div>
+          <div className="lighting-group">
+            <label>Light Direction Y: {lighting.lightDirection.y}</label>
+            <input
+              type="range"
+              min="-10"
+              max="10"
+              step="1"
+              value={lighting.lightDirection.y}
+              onChange={(e) => setLighting(prev => ({ 
+                ...prev, 
+                lightDirection: { ...prev.lightDirection, y: parseInt(e.target.value) }
+              }))}
+              className="lighting-slider"
+            />
+          </div>
+          <div className="lighting-group">
+            <label>Light Direction Z: {lighting.lightDirection.z}</label>
+            <input
+              type="range"
+              min="-10"
+              max="10"
+              step="1"
+              value={lighting.lightDirection.z}
+              onChange={(e) => setLighting(prev => ({ 
+                ...prev, 
+                lightDirection: { ...prev.lightDirection, z: parseInt(e.target.value) }
+              }))}
+              className="lighting-slider"
+            />
+          </div>
+          <div className="lighting-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={lighting.shadows}
+                onChange={(e) => setLighting(prev => ({ ...prev, shadows: e.target.checked }))}
+              />
+              Enable Shadows
+            </label>
+          </div>
+        </div>
+      </div>
 
       {/* Grid Controls */}
       <div className="grid-controls">
