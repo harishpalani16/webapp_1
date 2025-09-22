@@ -8,12 +8,18 @@
     "build": "webpack --mode production",
     "dev": "webpack serve --mode development --open"
   },
-  "keywords": ["react", "webapp", "frontend"],
+  "keywords": [
+    "react",
+    "webapp",
+    "frontend"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "three": "^0.156.1",
+    "three-stdlib": "^2.36.0"
   },
   "devDependencies": {
     "@babel/core": "^7.22.0",
